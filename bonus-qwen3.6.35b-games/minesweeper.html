@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Minesweeper</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #1a1a2e;
+    color: #eee;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .game-container {
+    background: #16213e;
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 1.6rem;
+    margin-bottom: 16px;
+    letter-spacing: 2px;
+    color: #e94560;
+  }
+
+  .top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    gap: 12px;
+  }
+
+  .info-box {
+    background: #0f3460;
+    border: 2px solid #533483;
+    border-radius: 8px;
+    padding: 8px 16px;
+    min-width: 80px;
+    text-align: center;
+    font-family: 'Courier New', monospace;
+    font-size: 1.4rem;
+    font-weight: bold;
+    color: #e94560;
+  }
+
+  .info-box .label {
+    font-size: 0.65rem;
+    color: #aaa;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+  }
+
+  .reset-btn {
+    background: #e94560;
+    border: none;
+    color: #fff;
+    font-size: 1.6rem;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.15s, background 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .reset-btn:hover { transform: scale(1.1); background: #ff6b81; }
+  .reset-btn:active { transform: scale(0.95); }
+
+  .difficulty-bar {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .diff-btn {
+    background: #0f3460;
+    border: 2px solid #533483;
+    color: #ccc;
+    padding: 6px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+  .diff-btn:hover { border-color: #e94560; color: #fff; }
+  .diff-btn.active { background: #e94560; border-color: #e94560; color: #fff; }
+
+  .board {
+    display: inline-grid;
+    gap: 2px;
+    background: #0a1628;
+    border-radius: 8px;
+    padding: 4px;
+    margin: 0 auto;
+    display: grid;
+    justify-content: center;
+  }
+
+  .cell {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.95rem;
+    font-weight: 800;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.1s, transform 0.05s;
+    border: none;
+    outline: none;
+    position: relative;
+  }
+
+  .cell.hidden {
+    background: #1a3a5c;
+    box-shadow: inset 0 -2px 0 #0d2137, inset 0 2px 0 #2a5a8c;
+  }
+  .cell.hidden:hover { background: #234b73; transform: scale(1.05); }
+  .cell.hidden:active { transform: scale(0.95); box-shadow: inset 0 2px 0 #0d2137; }
+
+  .cell.revealed {
+    background: #16213e;
+    cursor: default;
+  }
+
+  .cell.flagged::after {
+    content: '🚩';
+    font-size: 1rem;
+  }
+
+  .cell.question::after {
+    content: '❓';
+    font-size: 0.85rem;
+  }
+
+  .cell.mine-hit {
+    background: #e94560 !important;
+    animation: explode 0.3s ease-out;
+  }
+
+  .cell.mine-shown {
+    background: #2a1a2e;
+  }
+
+  @keyframes explode {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.3); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes reveal-pop {
+    0% { transform: scale(0.5); opacity: 0; }
+    60% { transform: scale(1.1); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .cell.revealed { animation: reveal-pop 0.15s ease-out; }
+
+  /* Number colors */
+  .cell.n1 { color: #4fc3f7; }
+  .cell.n2 { color: #66bb6a; }
+  .cell.n3 { color: #ef5350; }
+  .cell.n4 { color: #7e57c2; }
+  .cell.n5 { color: #ff7043; }
+  .cell.n6 { color: #26c6da; }
+  .cell.n7 { color: #ec407a; }
+  .cell.n8 { color: #bdbdbd; }
+
+  .message-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  .message-overlay.show {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .message-box {
+    background: #16213e;
+    border: 3px solid #e94560;
+    border-radius: 16px;
+    padding: 32px 48px;
+    text-align: center;
+    transform: scale(0.8);
+    transition: transform 0.3s;
+  }
+  .message-overlay.show .message-box { transform: scale(1); }
+
+  .message-box h2 {
+    font-size: 2rem;
+    margin-bottom: 8px;
+  }
+  .message-box.win h2 { color: #66bb6a; }
+  .message-box.lose h2 { color: #e94560; }
+
+  .message-box p {
+    color: #aaa;
+    margin-bottom: 20px;
+    font-size: 1rem;
+  }
+
+  .message-box button {
+    background: #e94560;
+    border: none;
+    color: #fff;
+    padding: 10px 32px;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .message-box button:hover { background: #ff6b81; }
+</style>
+</head>
+<body>
+
+<div class="game-container">
+  <h1>💣 MINESWEEPER</h1>
+
+  <div class="difficulty-bar">
+    <button class="diff-btn" data-level="easy">Easy 9×9</button>
+    <button class="diff-btn active" data-level="medium">Medium 16×16</button>
+    <button class="diff-btn" data-level="hard">Hard 30×16</button>
+  </div>
+
+  <div class="top-bar">
+    <div class="info-box">
+      <div class="label">Mines</div>
+      <div id="mine-count">40</div>
+    </div>
+    <button class="reset-btn" id="reset-btn" title="New Game">🙂</button>
+    <div class="info-box">
+      <div class="label">Time</div>
+      <div id="timer">000</div>
+    </div>
+  </div>
+
+  <div class="board" id="board"></div>
+</div>
+
+<div class="message-overlay" id="overlay">
+  <div class="message-box" id="message-box">
+    <h2 id="msg-title">🎉 You Win!</h2>
+    <p id="msg-body">Cleared in 42 seconds</p>
+    <button id="msg-btn" onclick="resetGame()">Play Again</button>
+  </div>
+</div>
+
+<script>
+// ── Difficulty presets ──────────────────────────────────────
+const DIFFICULTIES = {
+  easy:   { rows:  9, cols:  9, mines: 10 },
+  medium: { rows: 16, cols: 16, mines: 40 },
+  hard:   { rows: 16, cols: 30, mines: 99 },
+};
+
+// ── Game state ──────────────────────────────────────────────
+let currentLevel = 'medium';
+let rows, cols, totalMines;
+let grid;          // 2D array of cell objects
+let gameState;     // 'idle' | 'playing' | 'won' | 'lost'
+let minesLeft;
+let timerInterval;
+let seconds = 0;
+let firstClick = true;
+
+// ── DOM refs ────────────────────────────────────────────────
+const boardEl = document.getElementById('board');
+const mineCountEl = document.getElementById('mine-count');
+const timerEl = document.getElementById('timer');
+const resetBtn = document.getElementById('reset-btn');
+const overlay = document.getElementById('overlay');
+const msgBox = document.getElementById('message-box');
+const msgTitle = document.getElementById('msg-title');
+const msgBody = document.getElementById('msg-body');
+
+// ── Init ────────────────────────────────────────────────────
+function init() {
+  const cfg = DIFFICULTIES[currentLevel];
+  rows = cfg.rows;
+  cols = cfg.cols;
+  totalMines = cfg.mines;
+  minesLeft = totalMines;
+
+  // Create empty grid
+  grid = [];
+  for (let r = 0; r < rows; r++) {
+    grid[r] = [];
+    for (let c = 0; c < cols; c++) {
+      grid[r][c] = { mine: false, revealed: false, flagged: false };
+    }
+  }
+
+  gameState = 'idle';
+  firstClick = true;
+  seconds = 0;
+  clearInterval(timerInterval);
+  timerEl.textContent = '000';
+  updateMineCount();
+  resetBtn.textContent = '🙂';
+  overlay.classList.remove('show');
+
+  renderBoard();
+}
+
+// ── Place mines (after first click, avoid clicked cell + optional neighbor ring) ──
+function placeMines(safeR, safeC) {
+  // Determine safe cells: the clicked cell and its 8 neighbors
+  const safeSet = new Set();
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const nr = safeR + dr;
+      const nc = safeC + dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+        safeSet.add(nr * cols + nc);
+      }
+    }
+  }
+
+  let placed = 0;
+  while (placed < totalMines) {
+    const r = Math.floor(Math.random() * rows);
+    const c = Math.floor(Math.random() * cols);
+    const idx = r * cols + c;
+    if (!grid[r][c].mine && !safeSet.has(idx)) {
+      grid[r][c].mine = true;
+      placed++;
+    }
+  }
+
+  // Calculate adjacentMines for every non-mine cell
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (grid[r][c].mine) continue;
+      let count = 0;
+      forEachNeighbor(r, c, (nr, nc) => {
+        if (grid[nr][nc].mine) count++;
+      });
+      grid[r][c].adjacentMines = count;
+    }
+  }
+}
+
+// ── Neighbor iteration ──────────────────────────────────────
+function forEachNeighbor(r, c, fn) {
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      if (dr === 0 && dc === 0) continue;
+      const nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+        fn(nr, nc);
+      }
+    }
+  }
+}
+
+// ── Flood fill (BFS) ────────────────────────────────────────
+function floodFill(startR, startC) {
+  const queue = [[startR, startC]];
+  const visited = new Set();
+  visited.add(startR * cols + startC);
+
+  while (queue.length > 0) {
+    const [r, c] = queue.shift();
+    const cell = grid[r][c];
+    if (cell.mine || cell.revealed) continue;
+
+    cell.revealed = true;
+
+    if (cell.adjacentMines === 0) {
+      forEachNeighbor(r, c, (nr, nc) => {
+        const nIdx = nr * cols + nc;
+        if (!visited.has(nIdx)) {
+          visited.add(nIdx);
+          queue.push([nr, nc]);
+        }
+      });
+    }
+  }
+}
+
+// ── Cell click handler ──────────────────────────────────────
+function handleLeftClick(r, c) {
+  if (gameState === 'won' || gameState === 'lost') return;
+  const cell = grid[r][c];
+
+  // Can only reveal hidden, unflagged cells
+  if (cell.revealed || cell.flagged) return;
+
+  // First click: place mines, start timer
+  if (firstClick) {
+    firstClick = false;
+    placeMines(r, c);
+    startTimer();
+    gameState = 'playing';
+  }
+
+  // Hit a mine → game over
+  if (cell.mine) {
+    cell.revealed = true;
+    gameState = 'lost';
+    clearInterval(timerInterval);
+    revealAllMines(r, c);
+    resetBtn.textContent = '😵';
+    renderBoard();
+    setTimeout(() => showMessage(false), 400);
+    return;
+  }
+
+  // Reveal cell + flood fill
+  floodFill(r, c);
+
+  // Re-render
+  renderBoard();
+
+  // Check win
+  if (checkWin()) {
+    gameState = 'won';
+    clearInterval(timerInterval);
+    resetBtn.textContent = '😎';
+    // Auto-flag remaining mines
+    flagAllMines();
+    updateMineCount();
+    renderBoard();
+    setTimeout(() => showMessage(true), 300);
+  }
+}
+
+// ── Flag / right-click ──────────────────────────────────────
+function handleRightClick(r, c) {
+  if (gameState === 'won' || gameState === 'lost') return;
+  if (firstClick) return; // don't allow flagging before mines are placed
+
+  const cell = grid[r][c];
+  if (cell.revealed) return;
+
+  cell.flagged = !cell.flagged;
+  minesLeft += cell.flagged ? -1 : 1;
+  updateMineCount();
+  renderBoard();
+}
+
+// ── Reveal all mines on loss ────────────────────────────────
+function revealAllMines(hitR, hitC) {
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = grid[r][c];
+      if (cell.mine) {
+        cell.revealed = true;
+      }
+      // Show wrong flags
+      if (!cell.mine && cell.flagged) {
+        cell.wrongFlag = true;
+      }
+    }
+  }
+  // Mark hit mine
+  grid[hitR][hitC].isHit = true;
+}
+
+// ── Auto-flag all mines (on win) ────────────────────────────
+function flagAllMines() {
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (grid[r][c].mine) grid[r][c].flagged = true;
+    }
+  }
+}
+
+// ── Win check ───────────────────────────────────────────────
+function checkWin() {
+  let unrevealedNonMines = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = grid[r][c];
+      if (!cell.mine && !cell.revealed) {
+        unrevealedNonMines++;
+      }
+    }
+  }
+  return unrevealedNonMines === 0;
+}
+
+// ── Rendering ───────────────────────────────────────────────
+function renderBoard() {
+  boardEl.innerHTML = '';
+  boardEl.style.gridTemplateColumns = `repeat(${cols}, 32px)`;
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = grid[r][c];
+      const div = document.createElement('div');
+      div.className = 'cell';
+      div.dataset.r = r;
+      div.dataset.c = c;
+
+      if (cell.revealed) {
+        div.classList.add('revealed');
+        if (cell.mine) {
+          div.textContent = '💣';
+          if (cell.isHit) div.classList.add('mine-hit');
+          else div.classList.add('mine-shown');
+        } else if (cell.adjacentMines > 0) {
+          div.textContent = cell.adjacentMines;
+          div.classList.add('n' + cell.adjacentMines);
+        }
+      } else if (cell.flagged) {
+        div.classList.add('hidden', 'flagged');
+        if (cell.wrongFlag) {
+          div.textContent = '❌';
+          div.style.color = '#e94560';
+        }
+      } else {
+        div.classList.add('hidden');
+      }
+
+      div.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (e.button === 0) handleLeftClick(r, c);
+        else if (e.button === 2) handleRightClick(r, c);
+      });
+
+      // Prevent context menu on board
+      div.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      boardEl.appendChild(div);
+    }
+  }
+}
+
+// ── Timer ───────────────────────────────────────────────────
+function startTimer() {
+  clearInterval(timerInterval);
+  seconds = 0;
+  timerInterval = setInterval(() => {
+    seconds++;
+    timerEl.textContent = String(seconds).padStart(3, '0');
+    if (seconds >= 999) clearInterval(timerInterval);
+  }, 1000);
+}
+
+function updateMineCount() {
+  mineCountEl.textContent = String(Math.max(-99, Math.min(999, minesLeft))).padStart(3, '0');
+}
+
+// ── Message overlay ─────────────────────────────────────────
+function showMessage(won) {
+  msgBox.className = 'message-box ' + (won ? 'win' : 'lose');
+  msgTitle.textContent = won ? '🎉 You Win!' : '💥 Game Over';
+  msgBody.textContent = won
+    ? `Cleared in ${seconds} second${seconds !== 1 ? 's' : ''}!`
+    : 'Better luck next time!';
+  overlay.classList.add('show');
+}
+
+function hideMessage() {
+  overlay.classList.remove('show');
+}
+
+// ── Reset ───────────────────────────────────────────────────
+function resetGame() {
+  hideMessage();
+  init();
+}
+
+// ── Difficulty buttons ──────────────────────────────────────
+document.querySelectorAll('.diff-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelector('.diff-btn.active').classList.remove('active');
+    btn.classList.add('active');
+    currentLevel = btn.dataset.level;
+    resetGame();
+  });
+});
+
+// ── Reset button ────────────────────────────────────────────
+resetBtn.addEventListener('click', resetGame);
+
+// ── Prevent context menu on entire board ────────────────────
+boardEl.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// ── Start ───────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
