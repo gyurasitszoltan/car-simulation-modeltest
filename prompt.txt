@@ -1,0 +1,5 @@
+Create a single HTML file with a full-page canvas and no directories. Simulate a realistic side view of a moving car as the main subject. Keep the car clearly visible in the foreground while the landscape
+in the background continuously scrolls to create the impression that the car is moving forward. Use a layered landscape to create depth: have the foreground ground, roadside elements, trees, power
+poles,and distant hills or mountains move at different speeds to achieve a natural parallax effect. Animate the realistic rotation of the wheels and add subtle body movement to make the car feel connected to
+the road. Let the environment pass by seamlessly behind it, with a repetitive yet varied landscape that makes the movement believable. Use cinematic lighting and a cohesive sky, such as sunset, twilight, or
+daytime, to enhance the atmosphere. The overall movement should be calm, immersive, and realistic, with smooth looping animation.
