@@ -1,0 +1,35 @@
+Pac-Man – grid-based single-file HTML/JS spec
+
+ Create a Pac-Man-style maze game in one HTML file with embedded JavaScript and CSS. The internal game model must be grid-based, not pixel-based.
+
+ Represent the map as a 2D tile array. Each tile is one logical cell: wall, empty path, pellet, power pellet, ghost house, tunnel, Pac-Man spawn, or ghost spawn. Pac-Man and ghosts store their position as
+ grid coordinates, e.g. {x, y}, plus direction and nextDirection.
+
+ Movement happens from tile to tile. Pac-Man never freely moves through pixels. On each movement tick, check the target grid cell in the requested direction. Move only if that tile is walkable. If the target
+ tile is a wall, Pac-Man stays in the current cell. This prevents passing through walls or getting stuck inside them.
+
+ For animation, interpolate visually between the previous grid cell and the new grid cell, but do not use the interpolated pixel position for collision or game logic. Rendering can convert grid coordinates
+ to canvas pixels using:
+
+ screenX = gridX * tileSize;
+ screenY = gridY * tileSize;
+
+ Pac-Man eats pellets when he enters their grid cell. Power pellets switch ghosts into frightened mode for a limited number of ticks. Side tunnels wrap entities from one side of the grid to the other.
+
+ Ghosts also move tile by tile. At each tile, choose one legal neighboring walkable tile. Normal ghosts may choose the direction that minimizes Manhattan distance to Pac-Man. Frightened ghosts choose
+ randomly. Avoid reversing direction unless forced.
+
+ Collision is grid-based: if Pac-Man and a ghost occupy the same grid cell, Pac-Man loses a life unless the ghost is frightened; then the ghost is eaten and returns to spawn.
+
+ The game loop should:
+
+ Read input and store nextDirection.
+ On each fixed logic tick, try to apply Pac-Man’s nextDirection.
+ If the target tile is walkable, move Pac-Man exactly one grid cell.
+ Eat pellet or power pellet on the new cell.
+ Move each ghost exactly one grid cell using legal-grid movement.
+ Resolve same-cell Pac-Man/ghost collisions.
+ Update score, frightened timers, lives, win/lose state.
+ Render the grid and entities to canvas, optionally with interpolation.
+
+ Critical rule: all game logic uses grid cells only; pixels are only for drawing.

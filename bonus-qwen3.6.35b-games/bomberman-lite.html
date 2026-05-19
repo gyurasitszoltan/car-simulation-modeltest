@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bomberman Lite</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Courier New', monospace;
+    color: #e0e0e0;
+  }
+  h1 {
+    color: #ff6b6b;
+    margin-bottom: 8px;
+    font-size: 28px;
+    text-shadow: 0 0 10px rgba(255,107,107,0.5);
+  }
+  #ui-bar {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 8px;
+    font-size: 16px;
+    background: #16213e;
+    padding: 8px 20px;
+    border-radius: 8px;
+    border: 1px solid #0f3460;
+  }
+  #ui-bar span { white-space: nowrap; }
+  .label { color: #888; }
+  .value { color: #ffd700; font-weight: bold; }
+  #canvas-wrap {
+    border: 3px solid #0f3460;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  canvas { display: block; }
+  #overlay {
+    position: absolute;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.75);
+    width: 100%;
+    height: 100%;
+    top: 0; left: 0;
+    z-index: 10;
+  }
+  #overlay.show { display: flex; }
+  #overlay h2 { font-size: 36px; margin-bottom: 12px; }
+  #overlay button {
+    padding: 10px 28px;
+    font-size: 18px;
+    font-family: 'Courier New', monospace;
+    background: #e94560;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #overlay button:hover { background: #ff6b6b; }
+  #help {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #666;
+    text-align: center;
+  }
+  #msg {
+    margin-top: 6px;
+    height: 20px;
+    font-size: 14px;
+    color: #ffd700;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>BOMBERMAN LITE</h1>
+
+<div id="ui-bar">
+  <span><span class="label">Score: </span><span class="value" id="ui-score">0</span></span>
+  <span><span class="label">Lives: </span><span class="value" id="ui-lives">3</span></span>
+  <span><span class="label">Blast: </span><span class="value" id="ui-blast">1</span></span>
+  <span><span class="label">Bombs: </span><span class="value" id="ui-bombs">1</span></span>
+  <span><span class="label">Speed: </span><span class="value" id="ui-speed">1</span></span>
+  <span><span class="label">Enemies: </span><span class="value" id="ui-enemies">0</span></span>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="game"></canvas>
+  <div id="overlay">
+    <h2 id="overlay-title">GAME OVER</h2>
+    <p id="overlay-sub" style="color:#ccc;margin-bottom:14px;font-size:16px;"></p>
+    <button id="overlay-btn">PLAY AGAIN</button>
+  </div>
+</div>
+
+<div id="msg"></div>
+<div id="help">Arrow keys: move &nbsp;|&nbsp; Space: place bomb &nbsp;|&nbsp; R: restart</div>
+
+<script>
+// ============================================================
+//  CONSTANTS
+// ============================================================
+const COLS        = 15;
+const ROWS        = 13;
+const TILE        = 40;          // px per cell
+const TICK_MS     = 100;         // logic tick (10 Hz)
+const FLAME_TTL   = 3;           // ticks flames last
+const BOMB_TTL    = 6;           // ticks before explosion
+const PLAYER_MOVE_INTERVAL = 2;  // ticks between auto-moves (0 = off)
+const ENEMY_MOVE_INTERVAL  = 3;  // ticks between enemy moves
+
+const WALL_SOLID   = 0;
+const WALL_BREAK   = 1;
+const FLOOR        = 2;
+
+const KIND_PLAYER  = 'player';
+const KIND_ENEMY   = 'enemy';
+const KIND_BOMB    = 'bomb';
+const KIND_FLAME   = 'flame';
+const KIND_EXIT    = 'exit';
+const KIND_POWERUP = 'powerup';
+
+// Power-up types
+const PU_BLAST    = 'blast';   // +1 blast radius
+const PU_BOMB     = 'bomb';    // +1 max bombs
+const PU_SPEED    = 'speed';   // -1 tick move interval
+const PU_LIFE     = 'life';    // extra life
+
+const PU_LABELS = { blast:'B', bomb:'X', speed:'S', life:'♥' };
+const PU_COLORS = { blast:'#ff9f43', bomb:'#54a0ff', speed:'#5f27cd', life:'#ff6b6b' };
+
+// ============================================================
+//  GAME STATE
+// ============================================================
+let grid,       // 2D array of { kind, ... }
+    player,
+    enemies,
+    score,
+    lives,
+    blastRadius,
+    maxBombs,
+    moveInterval, // ticks between moves (higher = slower)
+    gameOver,
+    level,
+    tick,         // master tick counter
+    playerMoveTick,
+    enemyMoveTick,
+    pendingFlames,
+    pendingBombs,
+    destroyedThisTick,
+    enemiesAlive;
+
+const canvas = document.getElementById('game');
+const ctx    = canvas.getContext('2d');
+canvas.width  = COLS * TILE;
+canvas.height = ROWS * TILE;
+
+// Overlay
+const overlay    = document.getElementById('overlay');
+const overlayT   = document.getElementById('overlay-title');
+const overlayS   = document.getElementById('overlay-sub');
+const overlayBtn = document.getElementById('overlay-btn');
+
+// UI
+const uiScore   = document.getElementById('ui-score');
+const uiLives   = document.getElementById('ui-lives');
+const uiBlast   = document.getElementById('ui-blast');
+const uiBombs   = document.getElementById('ui-bombs');
+const uiSpeed   = document.getElementById('ui-speed');
+const uiEnemies = document.getElementById('ui-enemies');
+const msgEl     = document.getElementById('msg');
+
+function msg(t) { msgEl.textContent = t; }
+clearMsg = () => { msgEl.textContent = ''; };
+
+// ============================================================
+//  INPUT
+// ============================================================
+let keys = {};
+let dirPressed = null;          // last arrow dir pushed
+let bombRequested = false;
+
+document.addEventListener('keydown', e => {
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','KeyR'].includes(e.code)) {
+    e.preventDefault();
+  }
+  keys[e.code] = true;
+  if (e.code === 'ArrowUp')    dirPressed = {x:0, y:-1};
+  if (e.code === 'ArrowDown')  dirPressed = {x:0, y:1};
+  if (e.code === 'ArrowLeft')  dirPressed = {x:-1, y:0};
+  if (e.code === 'ArrowRight') dirPressed = {x:1, y:0};
+  if (e.code === 'Space')      bombRequested = true;
+  if (e.code === 'KeyR')       restart();
+});
+document.addEventListener('keyup', e => {
+  keys[e.code] = false;
+});
+
+overlayBtn.addEventListener('click', restart);
+
+// ============================================================
+//  MAP GENERATION
+// ============================================================
+function buildMap() {
+  const g = [];
+  for (let r = 0; r < ROWS; r++) {
+    g[r] = [];
+    for (let c = 0; c < COLS; c++) {
+      if (r === 0 || r === ROWS-1 || c === 0 || c === COLS-1) {
+        g[r][c] = { type: WALL_SOLID };
+      } else if (r % 2 === 0 && c % 2 === 0) {
+        g[r][c] = { type: WALL_SOLID };
+      } else {
+        g[r][c] = { type: FLOOR };
+      }
+    }
+  }
+  // Clear player start corner
+  g[1][1]   = { type: FLOOR };
+  g[1][2]   = { type: FLOOR };
+  g[2][1]   = { type: FLOOR };
+
+  // Place breakable walls
+  for (let r = 1; r < ROWS-1; r++) {
+    for (let c = 1; c < COLS-1; c++) {
+      if (g[r][c].type !== FLOOR) continue;
+      // Avoid start area and enemy spawn areas
+      if (r <= 2 && c <= 2) continue;
+      if (Math.random() < 0.35) {
+        g[r][c] = { type: WALL_BREAK };
+      }
+    }
+  }
+  return g;
+}
+
+// ============================================================
+//  ENEMY SPAWNING
+// ============================================================
+function spawnEnemies(count) {
+  const list = [];
+  const spots = [];
+  for (let r = 2; r < ROWS-2; r++) {
+    for (let c = 2; c < COLS-2; c++) {
+      if (r <= 2 && c <= 2) continue;
+      const cell = grid[r][c];
+      if (cell.type === FLOOR && !cell.kind) {
+        spots.push({r, c});
+      }
+    }
+  }
+  // Shuffle and pick
+  for (let i = spots.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [spots[i], spots[j]] = [spots[j], spots[i]];
+  }
+  for (let i = 0; i < Math.min(count, spots.length); i++) {
+    const s = spots[i];
+    list.push({
+      r: s.r, c: s.c,
+      dir: { x: Math.random() < 0.5 ? 1 : -1, y: 0 },
+      alive: true,
+      moveTimer: Math.floor(Math.random() * ENEMY_MOVE_INTERVAL)
+    });
+  }
+  return list;
+}
+
+// ============================================================
+//  INIT / RESTART
+// ============================================================
+function initLevel(lvl) {
+  level = lvl;
+  grid = buildMap();
+
+  player = { r: 1, c: 1, dir: {x:0,y:0} };
+  enemies = spawnEnemies(3 + lvl * 2);
+  enemiesAlive = enemies.length;
+  score = (lvl === 1) ? score : score;
+  lives = (lvl === 1) ? 3 : lives;
+  blastRadius = (lvl === 1) ? 1 : blastRadius;
+  maxBombs    = (lvl === 1) ? 1 : maxBombs;
+  moveInterval = (lvl === 1) ? 2 : moveInterval;
+  gameOver = false;
+  tick = 0;
+  playerMoveTick = 0;
+  enemyMoveTick = 0;
+  overlay.classList.remove('show');
+
+  // Place exit — hidden under a random breakable wall or visible
+  const breakables = [];
+  for (let r = 1; r < ROWS-1; r++)
+    for (let c = 1; c < COLS-1; c++)
+      if (grid[r][c].type === WALL_BREAK) breakables.push({r,c});
+  if (breakables.length > 0) {
+    const pick = breakables[Math.floor(Math.random() * breakables.length)];
+    const wall = grid[pick.r][pick.c];
+    wall.exitUnder = true;
+  }
+
+  enemies = spawnEnemies(3 + lvl * 2);
+  enemiesAlive = enemies.length;
+
+  updateUI();
+  msg(`Level ${lvl} — defeat all ${enemiesAlive} enemies to reveal the exit!`);
+}
+
+function restart() {
+  blastRadius = 1;
+  maxBombs = 1;
+  moveInterval = 2;
+  score = 0;
+  lives = 3;
+  initLevel(1);
+}
+
+// ============================================================
+//  HELPERS
+// ============================================================
+function cell(r, c) {
+  if (r < 0 || r >= ROWS || c < 0 || c >= COLS) return null;
+  return grid[r][c];
+}
+
+function isWall(r, c) {
+  const cl = cell(r, c);
+  return cl && (cl.type === WALL_SOLID || cl.type === WALL_BREAK);
+}
+
+function isWalkable(r, c, includeEnemies) {
+  const cl = cell(r, c);
+  if (!cl) return false;
+  if (cl.type === WALL_SOLID) return false;
+  if (cl.kind === KIND_BOMB) return false;
+  if (cl.kind === KIND_FLAME) return false;
+  if (includeEnemies && cl.kind === KIND_ENEMY) return false;
+  return true;
+}
+
+function findKind(r, c, kind) {
+  const cl = cell(r, c);
+  return (cl && cl.kind === kind) ? cl : null;
+}
+
+function countAliveEnemies() {
+  return enemies.filter(e => e.alive).length;
+}
+
+function allEnemiesDead() {
+  return countAliveEnemies() === 0;
+}
+
+function exitRevealed() {
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      const cl = grid[r][c];
+      if (cl.kind === KIND_EXIT) return true;
+    }
+  return false;
+}
+
+function revealExit() {
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      const cl = grid[r][c];
+      if (cl.exitUnder) {
+        cl.type = FLOOR;
+        cl.kind = KIND_EXIT;
+      }
+    }
+}
+
+function placePowerup(r, c, type) {
+  const cl = cell(r, c);
+  cl.type = FLOOR;
+  cl.kind = KIND_POWERUP;
+  cl.puType = type;
+}
+
+// ============================================================
+//  BOMB PLACEMENT
+// ============================================================
+function placeBomb() {
+  if (gameOver) return;
+  // Count bombs on board
+  let bombCount = 0;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (grid[r][c].kind === KIND_BOMB) bombCount++;
+  if (bombCount >= maxBombs) { msg("Max bombs reached!"); return; }
+  if (findKind(player.r, player.c, KIND_BOMB)) return;
+
+  const cl = grid[player.r][player.c];
+  cl.kind = KIND_BOMB;
+  cl.bombTtl = BOMB_TTL;
+}
+
+// ============================================================
+//  EXPLOSION
+// ============================================================
+function explodeBomb(bombCell, r, c) {
+  const radius = blastRadius;
+  bombCell.exploded = true;
+  bombCell.kind = null;
+  bombCell.bombTtl = undefined;
+
+  // Mark center
+  addFlame(r, c);
+
+  const dirs = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+  for (const d of dirs) {
+    for (let i = 1; i <= radius; i++) {
+      const nr = r + d.y * i;
+      const nc = c + d.x * i;
+      const cl = cell(nr, nc);
+      if (!cl) break;
+      if (cl.type === WALL_SOLID) break;
+      if (cl.type === WALL_BREAK) {
+        addFlame(nr, nc);
+        cl.type = FLOOR;
+        // Destroy chain-reaction bombs
+        if (cl.kind === KIND_BOMB && cl.bombTtl !== undefined) {
+          cl.bombTtl = 0; // will explode next tick
+        }
+        // Drop power-up
+        if (Math.random() < 0.35) {
+          const types = [PU_BLAST, PU_BOMB, PU_SPEED, PU_LIFE];
+          placePowerup(nr, nc, types[Math.floor(Math.random() * types.length)]);
+        }
+        break;
+      }
+      addFlame(nr, nc);
+
+      // Chain: if another bomb is here, set it to explode
+      if (cl.kind === KIND_BOMB && cl.bombTtl !== undefined) {
+        cl.bombTtl = 0;
+      }
+    }
+  }
+}
+
+function addFlame(r, c) {
+  const cl = cell(r, c);
+  if (!cl) return;
+  cl.kind = KIND_FLAME;
+  cl.flameTtl = FLAME_TTL;
+  pendingFlames.push({r, c});
+}
+
+// ============================================================
+//  GAME LOGIC TICK
+// ============================================================
+function logicTick() {
+  if (gameOver) return;
+  tick++;
+
+  pendingFlames = [];
+  destroyedThisTick = false;
+
+  // --- 1. Player move (arrow keys) ---
+  if (dirPressed) {
+    if (tick % moveInterval === 0) {
+      tryPlayerMove(dirPressed.x, dirPressed.y);
+    }
+  }
+
+  // --- 1b. Bomb request ---
+  if (bombRequested) {
+    bombRequested = false;
+    placeBomb();
+  }
+
+  // --- 2. Decrease bomb timers ---
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cl = cell(r, c);
+      if (cl.kind === KIND_BOMB && cl.bombTtl !== undefined && !cl.exploded) {
+        cl.bombTtl--;
+        if (cl.bombTtl <= 0) {
+          explodeBomb(cl, r, c);
+        }
+      }
+    }
+  }
+
+  // --- 3. Chain-reaction explosions (already handled inline in explodeBomb, but scan for newly-zeroed) ---
+  // explodeBomb already decrements and explodes inline.
+
+  // --- 4. Update flame timers and remove expired ---
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cl = cell(r, c);
+      if (cl.kind === KIND_FLAME) {
+        cl.flameTtl--;
+        if (cl.flameTtl <= 0) {
+          cl.kind = null;
+          cl.flameTtl = undefined;
+        }
+      }
+    }
+  }
+
+  // --- 5. Move enemies ---
+  if (tick % ENEMY_MOVE_INTERVAL === 0) {
+    for (const e of enemies) {
+      if (!e.alive) continue;
+      tryMoveEnemy(e);
+    }
+  }
+
+  // --- 6. Resolve collisions ---
+  // Player on flame
+  const pCell = cell(player.r, player.c);
+  if (pCell && pCell.kind === KIND_FLAME) {
+    hurtPlayer();
+  }
+
+  // Enemy touches player
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    if (e.r === player.r && e.c === player.c) {
+      hurtPlayer();
+      break;
+    }
+  }
+
+  // Enemy hit by flame (died)
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cl = cell(r, c);
+      if (cl.kind === KIND_FLAME) {
+        for (const e of enemies) {
+          if (e.alive && e.r === r && e.c === c) {
+            e.alive = false;
+            score += 100;
+          }
+        }
+      }
+    }
+  }
+
+  // --- 7. Check exit reveal ---
+  if (allEnemiesDead() && !exitRevealed()) {
+    revealExit();
+    msg("Exit revealed! Find it to advance!");
+  }
+
+  // --- 8. Player on exit ---
+  if (exitRevealed() && cell(player.r, player.c) && cell(player.r, player.c).kind === KIND_EXIT) {
+    levelComplete();
+  }
+
+  // --- 9. Collect power-ups ---
+  if (pCell && pCell.kind === KIND_POWERUP) {
+    applyPowerup(pCell.puType);
+    pCell.kind = null;
+    pCell.puType = undefined;
+  }
+
+  // --- 10. Update UI ---
+  enemiesAlive = countAliveEnemies();
+  updateUI();
+}
+
+function tryPlayerMove(dx, dy) {
+  const nr = player.r + dy;
+  const nc = player.c + dx;
+  if (!isWalkable(nr, nc, false)) return;
+  player.r = nr;
+  player.c = nc;
+  player.dir = {x: dx, y: dy};
+}
+
+function tryMoveEnemy(e) {
+  const dirs = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+
+  // Try current direction first
+  let nr = e.r + e.dir.y;
+  let nc = e.c + e.dir.x;
+  if (isWalkable(nr, nc, false) && !(nr === player.r && nc === player.c)) {
+    e.r = nr;
+    e.c = nc;
+    return;
+  }
+
+  // Pick random legal direction
+  const shuffled = dirs.slice().sort(() => Math.random() - 0.5);
+  for (const d of shuffled) {
+    nr = e.r + d.y;
+    nc = e.c + d.x;
+    if (isWalkable(nr, nc, false) && !(nr === player.r && nc === player.c)) {
+      e.r = nr;
+      e.c = nc;
+      e.dir = {x: d.x, y: d.y};
+      return;
+    }
+  }
+}
+
+function hurtPlayer() {
+  lives--;
+  updateUI();
+  if (lives <= 0) {
+    gameOver = true;
+    overlayT.textContent = 'GAME OVER';
+    overlayT.style.color = '#ff6b6b';
+    overlayS.textContent = `Score: ${score}`;
+    overlay.classList.add('show');
+    msg("You died!");
+  } else {
+    // Reset player position
+    player.r = 1;
+    player.c = 1;
+    // Clear bombs near spawn
+    clearNearbyBombs(1, 1);
+    msg(`Lost a life! ${lives} lives remaining.`);
+  }
+}
+
+function clearNearbyBombs(r, c) {
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const cl = cell(r + dr, c + dc);
+      if (cl && cl.kind === KIND_BOMB) {
+        cl.kind = null;
+        cl.bombTtl = undefined;
+      }
+    }
+  }
+}
+
+function applyPowerup(type) {
+  switch (type) {
+    case PU_BLAST:
+      blastRadius++;
+      msg("Blast radius increased!");
+      break;
+    case PU_BOMB:
+      maxBombs++;
+      msg("Max bombs increased!");
+      break;
+    case PU_SPEED:
+      moveInterval = Math.max(1, moveInterval - 1);
+      msg("Movement speed increased!");
+      break;
+    case PU_LIFE:
+      lives = Math.min(lives + 1, 9);
+      msg("Extra life!");
+      break;
+  }
+  updateUI();
+}
+
+function levelComplete() {
+  score += 500 + level * 200;
+  initLevel(level + 1);
+  msg(`Level ${level} cleared! +${500 + (level - 1) * 200} points`);
+}
+
+// ============================================================
+//  RENDERING
+// ============================================================
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cl = grid[r][c];
+      const x = c * TILE;
+      const y = r * TILE;
+
+      // Floor
+      ctx.fillStyle = (r + c) % 2 === 0 ? '#2d3436' : '#263030';
+      ctx.fillRect(x, y, TILE, TILE);
+
+      // Solid wall
+      if (cl.type === WALL_SOLID) {
+        ctx.fillStyle = '#636e72';
+        ctx.fillRect(x, y, TILE, TILE);
+        // Bevel
+        ctx.fillStyle = '#7f8c8d';
+        ctx.fillRect(x+2, y+2, TILE-4, TILE-4);
+        ctx.fillStyle = '#535c60';
+        ctx.fillRect(x+4, y+4, TILE-8, TILE-8);
+        // Cross pattern
+        ctx.strokeStyle = '#535c60';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x+8, y+8); ctx.lineTo(x+TILE-8, y+TILE-8);
+        ctx.moveTo(x+TILE-8, y+8); ctx.lineTo(x+8, y+TILE-8);
+        ctx.stroke();
+        continue;
+      }
+
+      // Breakable wall
+      if (cl.type === WALL_BREAK) {
+        ctx.fillStyle = '#d35400';
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.fillStyle = '#e67e22';
+        ctx.fillRect(x+3, y+3, TILE-6, TILE-6);
+        // Brick lines
+        ctx.strokeStyle = '#a04000';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, y + TILE/2); ctx.lineTo(x+TILE, y+TILE/2);
+        ctx.moveTo(x+TILE/2, y); ctx.lineTo(x+TILE/2, y+TILE/2);
+        ctx.moveTo(x+TILE/4, y+TILE/2); ctx.lineTo(x+TILE/4, y+TILE);
+        ctx.moveTo(x+TILE*3/4, y+TILE/2); ctx.lineTo(x+TILE*3/4, y+TILE);
+        ctx.stroke();
+        continue;
+      }
+
+      // Power-up
+      if (cl.kind === KIND_POWERUP) {
+        ctx.fillStyle = PU_COLORS[cl.puType] || '#fff';
+        ctx.beginPath();
+        ctx.arc(x + TILE/2, y + TILE/2, TILE/3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Label
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 14px Courier New';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(PU_LABELS[cl.puType], x + TILE/2, y + TILE/2);
+        continue;
+      }
+
+      // Exit
+      if (cl.kind === KIND_EXIT) {
+        ctx.fillStyle = '#27ae60';
+        ctx.fillRect(x+4, y+4, TILE-8, TILE-8);
+        ctx.strokeStyle = '#2ecc71';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x+6, y+6, TILE-12, TILE-12);
+        // Arrow
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 20px Courier New';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('▲', x + TILE/2, y + TILE/2);
+        continue;
+      }
+    }
+  }
+
+  // --- Draw flames (on top) ---
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cl = cell(r, c);
+      if (cl.kind === KIND_FLAME) {
+        const alpha = 0.4 + 0.6 * (cl.flameTtl / FLAME_TTL);
+        ctx.fillStyle = `rgba(255, 100, 0, ${alpha})`;
+        ctx.fillRect(c * TILE + 2, r * TILE + 2, TILE - 4, TILE - 4);
+        // Inner glow
+        ctx.fillStyle = `rgba(255, 255, 0, ${alpha * 0.6})`;
+        ctx.fillRect(c * TILE + 8, r * TILE + 8, TILE - 16, TILE - 16);
+      }
+    }
+  }
+
+  // --- Draw bombs ---
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cl = cell(r, c);
+      if (cl.kind === KIND_BOMB && !cl.exploded) {
+        const cx = c * TILE + TILE/2;
+        const cy = r * TILE + TILE/2;
+        // Pulsing
+        const pulse = 0.9 + 0.1 * Math.sin(tick * 0.8);
+        const radius = (TILE/2 - 4) * pulse;
+
+        ctx.fillStyle = '#2d3436';
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#e74c3c';
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius - 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Fuse
+        ctx.strokeStyle = '#f1c40f';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius - 4, 0, Math.PI * 1.5);
+        ctx.stroke();
+
+        // Countdown number
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 12px Courier New';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(cl.bombTtl, cx, cy);
+      }
+    }
+  }
+
+  // --- Draw player ---
+  {
+    const cx = player.c * TILE + TILE/2;
+    const cy = player.r * TILE + TILE/2;
+    // Body
+    ctx.fillStyle = '#ecf0f1';
+    ctx.beginPath();
+    ctx.arc(cx, cy, TILE/2 - 3, 0, Math.PI * 2);
+    ctx.fill();
+    // Inner
+    ctx.fillStyle = '#3498db';
+    ctx.beginPath();
+    ctx.arc(cx, cy, TILE/2 - 7, 0, Math.PI * 2);
+    ctx.fill();
+    // Eyes
+    ctx.fillStyle = '#fff';
+    const eyeOffX = player.dir.x * 2;
+    const eyeOffY = player.dir.y * 2;
+    ctx.beginPath();
+    ctx.arc(cx - 4 + eyeOffX, cy - 3 + eyeOffY, 3, 0, Math.PI * 2);
+    ctx.arc(cx + 4 + eyeOffX, cy - 3 + eyeOffY, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2c3e50';
+    ctx.beginPath();
+    ctx.arc(cx - 4 + eyeOffX * 1.5, cy - 3 + eyeOffY * 1.5, 1.5, 0, Math.PI * 2);
+    ctx.arc(cx + 4 + eyeOffX * 1.5, cy - 3 + eyeOffY * 1.5, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // --- Draw enemies ---
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    const cx = e.c * TILE + TILE/2;
+    const cy = e.r * TILE + TILE/2;
+
+    // Body — red ghost-ish
+    ctx.fillStyle = '#c0392b';
+    ctx.beginPath();
+    ctx.arc(cx, cy - 2, TILE/2 - 3, Math.PI, 0);
+    ctx.lineTo(cx + TILE/2 - 3, cy + TILE/2 - 3);
+    // Wavy bottom
+    for (let i = 0; i < 4; i++) {
+      const wx = cx + TILE/2 - 3 - (i + 0.5) * (TILE - 6) / 4;
+      const wy = cy + TILE/2 - 3 + (i % 2 === 0 ? 4 : -2);
+      ctx.lineTo(wx, wy);
+    }
+    ctx.lineTo(cx - TILE/2 + 3, cy + TILE/2 - 3);
+    ctx.fill();
+
+    // Eyes
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(cx - 5, cy - 4, 4, 0, Math.PI * 2);
+    ctx.arc(cx + 5, cy - 4, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(cx - 4, cy - 4, 2, 0, Math.PI * 2);
+    ctx.arc(cx + 6, cy - 4, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ============================================================
+//  UI UPDATE
+// ============================================================
+function updateUI() {
+  uiScore.textContent = score;
+  uiLives.textContent = lives;
+  uiBlast.textContent = blastRadius;
+  uiBombs.textContent = maxBombs;
+  uiSpeed.textContent = moveInterval;
+  uiEnemies.textContent = countAliveEnemies();
+}
+
+// ============================================================
+//  GAME LOOP
+// ============================================================
+let lastTickTime = 0;
+
+function gameLoop(timestamp) {
+  if (timestamp - lastTickTime >= TICK_MS) {
+    lastTickTime = timestamp;
+    logicTick();
+  }
+  render();
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+//  START
+// ============================================================
+restart();
+requestAnimationFrame(gameLoop);
+
+</script>
+</body>
+</html>
